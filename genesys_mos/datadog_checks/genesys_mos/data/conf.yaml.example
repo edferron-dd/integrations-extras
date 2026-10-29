@@ -36,6 +36,23 @@ instances:
     #
     # mos_threshold: 4.2
 
+    ## @param collect_logs - boolean - optional - default: false
+    ## Emit one log per conversation carrying the columns shown in the Genesys
+    ## interactions view: date, conversation duration, direction, queue,
+    ## wrap-up, users, remote and MOS. Requires `logs_enabled: true` in the
+    ## Agent configuration.
+    #
+    # collect_logs: false
+
+    ## @param resolve_names - boolean - optional - default: true
+    ## Resolve queue, wrap-up code and agent ids into their display names via
+    ## the Genesys routing and users APIs when `collect_logs` is enabled. The
+    ## OAuth client's role needs "Routing > Queue > View",
+    ## "Routing > Wrapup Code > View" and "Directory > User > View". Disable to
+    ## log the raw ids and skip the extra API calls.
+    #
+    # resolve_names: true
+
     ## @param collection_lag_seconds - integer - optional - default: 60
     ## How far back to offset the trailing query window, giving Genesys time to index
     ## ended conversations before they are queried.

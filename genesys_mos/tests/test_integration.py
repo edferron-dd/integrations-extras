@@ -69,9 +69,21 @@ def _analytics_api_returning(pages):
     return api
 
 
-def _run_check(instance, analytics_api):
+def _apis(analytics_api, routing_api=None, users_api=None):
+    """Bundle the fake APIs the way ``_connect`` does for a real run."""
+    apis = MagicMock()
+    apis.analytics = analytics_api
+    if routing_api is not None:
+        apis.routing = routing_api
+    if users_api is not None:
+        apis.users = users_api
+    return apis
+
+
+def _run_check(instance, analytics_api, routing_api=None, users_api=None):
     check = GenesysMosCheck("genesys_mos", {}, [instance])
-    with patch.object(check, "_authenticate", return_value=analytics_api):
+    apis = _apis(analytics_api, routing_api, users_api)
+    with patch.object(check, "_connect", return_value=apis):
         check.check(None)
     return check
 
@@ -150,3 +162,116 @@ def test_conversation_without_mos_is_skipped(aggregator, instance):
     aggregator.assert_metric("genesys_mos.conversation.mos.min", value=4.30, tags=EXPECTED_TAGS)
     aggregator.assert_metric("genesys_mos.conversation.below_threshold.count", value=0, tags=EXPECTED_TAGS)
     aggregator.assert_metric("genesys_mos.can_connect", value=1, tags=EXPECTED_TAGS)
+
+
+def _entity(entity_id, name):
+    entity = MagicMock()
+    entity.id = entity_id
+    entity.name = name
+    return entity
+
+
+def _paged_listing(entities):
+    """A listing endpoint that returns ``entities`` then an empty page, matching
+    how the routing/users APIs terminate pagination."""
+    listing = MagicMock()
+    listing.entities = entities
+    empty = MagicMock()
+    empty.entities = []
+    return MagicMock(side_effect=[listing, empty])
+
+
+def test_conversation_detail_is_logged_with_resolved_names(aggregator, instance):
+    """Replay a realistic conversation-detail payload through the SDK
+    deserializer and assert the emitted logs carry the columns the Genesys
+    interactions view shows: date, duration, direction, queue, wrap-up, users,
+    remote and MOS."""
+    import PureCloudPlatformClientV2 as genesys
+
+    instance["collect_logs"] = True
+    api_client = genesys.api_client.ApiClient()
+    pages = [
+        _load_response(api_client, "conversations_detail.json"),
+        _load_response(api_client, "conversations_empty.json"),
+    ]
+    analytics_api = _analytics_api_returning(pages)
+
+    routing_api = MagicMock()
+    routing_api.get_routing_queues = _paged_listing(
+        [
+            _entity("aaaaaaa1-0000-4000-8000-000000000001", "Support_Outbound"),
+            _entity("aaaaaaa2-0000-4000-8000-000000000002", "Support_Inbound_BL"),
+        ]
+    )
+    routing_api.get_routing_wrapupcodes = _paged_listing(
+        [
+            _entity("bbbbbbb1-0000-4000-8000-000000000001", "No Message Left"),
+            _entity("bbbbbbb2-0000-4000-8000-000000000002", "No Answer"),
+        ]
+    )
+    users_api = MagicMock()
+    users_api.get_users = _paged_listing(
+        [
+            _entity("ccccccc1-0000-4000-8000-000000000001", "Avery Stone"),
+            _entity("ccccccc2-0000-4000-8000-000000000002", "Blair Nunez"),
+        ]
+    )
+
+    check = GenesysMosCheck("genesys_mos", {}, [instance])
+    with (
+        patch.object(check, "_connect", return_value=_apis(analytics_api, routing_api, users_api)),
+        patch.object(check, "send_log") as send_log,
+    ):
+        check.check(None)
+
+    logs = {call.args[0]["conversation_id"]: call.args[0] for call in send_log.call_args_list}
+    assert len(logs) == 2
+
+    # The transferred, two-agent conversation: both queues, both wrap-up codes,
+    # both users, and sessions in both directions.
+    transferred = logs["11111111-1111-4111-8111-111111111111"]
+    assert transferred["date"] == "2026-10-22T18:46:00+00:00"
+    assert transferred["conversation_duration"] == "4m 28s"
+    assert transferred["direction"] == "inbound/outbound"
+    assert transferred["queue"] == "Support_Outbound, Support_Inbound_BL"
+    assert transferred["wrap_up"] == "No Message Left, No Answer"
+    assert transferred["users"] == "Avery Stone, Blair Nunez"
+    assert transferred["remote"] == "Springfield IL"
+    assert transferred["mos"] == 2.9
+    assert transferred["status"] == "warning"
+    assert transferred["media_type"] == "voice"
+
+    # The simple outbound call.
+    outbound = logs["22222222-2222-4222-8222-222222222222"]
+    assert outbound["conversation_duration"] == "51s"
+    assert outbound["direction"] == "outbound"
+    assert outbound["queue"] == "Support_Outbound"
+    assert outbound["wrap_up"] == "No Message Left"
+    assert outbound["users"] == "Avery Stone"
+    # An unnamed external party renders the way the interactions view does.
+    assert outbound["remote"] == "Customer"
+    assert outbound["status"] == "info"
+
+    # Metrics are unchanged by log collection.
+    aggregator.assert_metric("genesys_mos.conversation.count", value=2, tags=EXPECTED_TAGS)
+    aggregator.assert_metric("genesys_mos.conversation.mos.min", value=2.9, tags=EXPECTED_TAGS)
+    aggregator.assert_metric("genesys_mos.conversation.below_threshold.count", value=1, tags=EXPECTED_TAGS)
+
+
+def test_logs_are_off_by_default(aggregator, instance):
+    import PureCloudPlatformClientV2 as genesys
+
+    api_client = genesys.api_client.ApiClient()
+    pages = [
+        _load_response(api_client, "conversations_detail.json"),
+        _load_response(api_client, "conversations_empty.json"),
+    ]
+    check = GenesysMosCheck("genesys_mos", {}, [instance])
+    with (
+        patch.object(check, "_connect", return_value=_apis(_analytics_api_returning(pages))),
+        patch.object(check, "send_log") as send_log,
+    ):
+        check.check(None)
+
+    assert send_log.call_count == 0
+    aggregator.assert_metric("genesys_mos.conversation.count", value=2, tags=EXPECTED_TAGS)

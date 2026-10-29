@@ -32,6 +32,7 @@ class InstanceConfig(BaseModel):
     )
     client_id: str
     client_secret: str
+    collect_logs: Optional[bool] = None
     collection_lag_seconds: Optional[int] = None
     disable_generic_tags: Optional[bool] = None
     empty_default_hostname: Optional[bool] = None
@@ -40,6 +41,7 @@ class InstanceConfig(BaseModel):
     min_collection_interval: Optional[float] = None
     mos_threshold: Optional[float] = None
     region: str
+    resolve_names: Optional[bool] = None
     service: Optional[str] = None
     tags: Optional[tuple[str, ...]] = None
 

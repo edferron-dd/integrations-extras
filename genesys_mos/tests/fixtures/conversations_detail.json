@@ -1,0 +1,117 @@
+{
+    "conversations": [
+        {
+            "conversationId": "11111111-1111-4111-8111-111111111111",
+            "conversationStart": "2026-10-22T18:46:00.000Z",
+            "conversationEnd": "2026-10-22T18:50:28.000Z",
+            "originatingDirection": "inbound",
+            "mediaStatsMinConversationMos": 2.9,
+            "participants": [
+                {
+                    "participantId": "ddddddd1-0000-4000-8000-000000000001",
+                    "purpose": "agent",
+                    "userId": "ccccccc1-0000-4000-8000-000000000001",
+                    "sessions": [
+                        {
+                            "direction": "inbound",
+                            "mediaType": "voice",
+                            "sessionId": "eeeeeee1-0000-4000-8000-000000000001",
+                            "segments": [
+                                {
+                                    "queueId": "aaaaaaa1-0000-4000-8000-000000000001",
+                                    "segmentType": "interact",
+                                    "segmentStart": "2026-10-22T18:46:00.000Z",
+                                    "segmentEnd": "2026-10-22T18:50:00.000Z"
+                                },
+                                {
+                                    "queueId": "aaaaaaa2-0000-4000-8000-000000000002",
+                                    "segmentType": "wrapup",
+                                    "wrapUpCode": "bbbbbbb1-0000-4000-8000-000000000001",
+                                    "segmentStart": "2026-10-22T18:50:00.000Z",
+                                    "segmentEnd": "2026-10-22T18:50:28.000Z"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "participantId": "ddddddd2-0000-4000-8000-000000000002",
+                    "purpose": "agent",
+                    "userId": "ccccccc2-0000-4000-8000-000000000002",
+                    "sessions": [
+                        {
+                            "direction": "outbound",
+                            "mediaType": "voice",
+                            "sessionId": "eeeeeee2-0000-4000-8000-000000000002",
+                            "segments": [
+                                {
+                                    "queueId": "aaaaaaa1-0000-4000-8000-000000000001",
+                                    "segmentType": "wrapup",
+                                    "wrapUpCode": "bbbbbbb2-0000-4000-8000-000000000002",
+                                    "segmentStart": "2026-10-22T18:50:00.000Z",
+                                    "segmentEnd": "2026-10-22T18:50:28.000Z"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "participantId": "ddddddd3-0000-4000-8000-000000000003",
+                    "purpose": "customer",
+                    "sessions": [
+                        {
+                            "direction": "inbound",
+                            "mediaType": "voice",
+                            "sessionId": "eeeeeee3-0000-4000-8000-000000000003",
+                            "remoteNameDisplayable": "Springfield IL",
+                            "segments": []
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "conversationId": "22222222-2222-4222-8222-222222222222",
+            "conversationStart": "2026-10-22T18:46:10.000Z",
+            "conversationEnd": "2026-10-22T18:47:01.000Z",
+            "originatingDirection": "outbound",
+            "mediaStatsMinConversationMos": 4.4,
+            "participants": [
+                {
+                    "participantId": "ddddddd4-0000-4000-8000-000000000004",
+                    "purpose": "agent",
+                    "userId": "ccccccc1-0000-4000-8000-000000000001",
+                    "sessions": [
+                        {
+                            "direction": "outbound",
+                            "mediaType": "voice",
+                            "sessionId": "eeeeeee4-0000-4000-8000-000000000004",
+                            "segments": [
+                                {
+                                    "queueId": "aaaaaaa1-0000-4000-8000-000000000001",
+                                    "segmentType": "wrapup",
+                                    "wrapUpCode": "bbbbbbb1-0000-4000-8000-000000000001",
+                                    "segmentStart": "2026-10-22T18:46:55.000Z",
+                                    "segmentEnd": "2026-10-22T18:47:01.000Z"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "participantId": "ddddddd5-0000-4000-8000-000000000005",
+                    "purpose": "customer",
+                    "sessions": [
+                        {
+                            "direction": "outbound",
+                            "mediaType": "voice",
+                            "sessionId": "eeeeeee5-0000-4000-8000-000000000005",
+                            "segments": []
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "totalHits": 2
+}

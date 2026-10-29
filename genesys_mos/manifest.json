@@ -15,6 +15,7 @@
     "classifier_tags": [
       "Category::Notifications",
       "Category::Metrics",
+      "Category::Log Collection",
       "Supported OS::Linux",
       "Supported OS::Windows",
       "Supported OS::macOS",
@@ -53,6 +54,9 @@
     },
     "monitors": {
       "Low average MOS": "assets/monitors/low_average_mos.json"
+    },
+    "logs": {
+      "source": "genesys-mos"
     }
   }
 }

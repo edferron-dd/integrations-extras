@@ -13,6 +13,11 @@ dimension (the minimum MOS observed on the conversation). This check queries end
 conversations on a trailing interval and reports the average and worst MOS, the number of
 conversations, and how many fall at or below a configurable quality threshold.
 
+The check can also emit one log per conversation, carrying the same columns as the Genesys
+Cloud interactions view: date, conversation duration, direction, queue, wrap-up, users,
+remote and MOS. Metrics stay aggregated (conversation-level detail would be unusable as
+metric tags), and the logs give you the per-interaction view to search, facet and pivot on.
+
 ## Setup
 
 ### Installation
@@ -27,7 +32,7 @@ versions of the Agent.
 1. Run the following command to install the integration's wheel with the Agent:
 
    ```shell
-   datadog-agent integration install -w /path/to/genesys_mos/dist/datadog_genesys_mos-1.0.0-py3-none-any.whl
+   datadog-agent integration install -w /path/to/genesys_mos/dist/datadog_genesys_mos-1.1.0-py3-none-any.whl
    ```
 
 2. This command does not install the check's third-party dependency, so install the Genesys
@@ -60,6 +65,31 @@ versions of the Agent.
 
    Set `region` to the API host for your organization (for example `mypurecloud.com`,
    `usw2.pure.cloud`, or `mypurecloud.ie`), without the `api.` prefix.
+
+3. [Restart the Agent][8].
+
+### Log collection
+
+1. Log collection is disabled in the Agent by default. Enable it in `datadog.yaml`:
+
+   ```yaml
+   logs_enabled: true
+   ```
+
+2. Set `collect_logs` on the instance. Resolving queue, wrap-up code and agent ids into
+   display names needs three more permissions on the OAuth client's role:
+   **Routing > Queue > View**, **Routing > Wrapup Code > View**, and
+   **Directory > User > View**. Set `resolve_names: false` to log the raw ids instead and
+   skip those lookups.
+
+   ```yaml
+   instances:
+     - region: mypurecloud.com
+       client_id: "<CLIENT_ID>"
+       client_secret: "<CLIENT_SECRET>"
+       min_collection_interval: 300
+       collect_logs: true
+   ```
 
 3. [Restart the Agent][8].
 
@@ -129,6 +159,32 @@ reported through the `genesys_mos.can_connect` metric, which is `1` when the che
 authenticate against the Genesys Cloud API and run the analytics conversation query, and
 `0` otherwise.
 
+### Logs
+
+With `collect_logs` enabled, the integration emits one log per ended conversation under the
+`genesys-mos` source. Each log is timestamped with the conversation start, so the log
+explorer timeline lines up with the Genesys interactions view, and carries:
+
+| Attribute | Description |
+| --- | --- |
+| `conversation_id` | The Genesys conversation ID. |
+| `date` | Conversation start, in ISO 8601. |
+| `conversation_end` | Conversation end, in ISO 8601. |
+| `conversation_duration` | Duration rendered as in the interactions view, for example `4m 28s`. |
+| `duration` | The same duration in seconds, for graphing. |
+| `direction` | `inbound`, `outbound`, or `inbound/outbound` when sessions ran both ways. |
+| `originating_direction` | The direction the conversation started in. |
+| `queue` / `queue_ids` | Queue names (comma separated) and their ids. |
+| `wrap_up` / `wrap_up_ids` | Wrap-up code names and their ids. |
+| `users` / `user_ids` | Agent names and their user ids. |
+| `remote` | The remote party's displayable name, or its purpose (for example `Customer`). |
+| `media_type` | Media types on the conversation, for example `voice`. |
+| `mos` | The conversation's minimum MOS. |
+| `mos_threshold`, `below_mos_threshold` | The configured threshold and whether this conversation is at or below it. |
+
+The log `status` is `warning` for conversations at or below `mos_threshold` and `info`
+otherwise, so you can alert on poor-quality interactions directly from logs.
+
 ### Events
 
 The Genesys Cloud MOS integration does not include any events.
@@ -142,6 +198,12 @@ The Genesys Cloud MOS integration does not include any events.
   measurable quality (for example voice), and only after they have ended and been indexed.
   Increase `collection_lag_seconds` if conversations appear to be missed near the window
   boundary.
+- No logs in Datadog: confirm `logs_enabled: true` in `datadog.yaml` and `collect_logs:
+  true` on the instance.
+- Logs show raw ids instead of names: the OAuth client's role is missing
+  **Routing > Queue > View**, **Routing > Wrapup Code > View**, or
+  **Directory > User > View**. The check logs a warning and falls back to ids rather than
+  dropping the logs.
 
 ## Support
 

@@ -35,6 +35,25 @@ files:
       value:
         type: number
         example: 4.2
+    - name: collect_logs
+      description: |
+        Emit one log per conversation carrying the columns shown in the Genesys
+        interactions view: date, conversation duration, direction, queue,
+        wrap-up, users, remote and MOS. Requires `logs_enabled: true` in the
+        Agent configuration.
+      value:
+        type: boolean
+        example: false
+    - name: resolve_names
+      description: |
+        Resolve queue, wrap-up code and agent ids into their display names via
+        the Genesys routing and users APIs when `collect_logs` is enabled. The
+        OAuth client's role needs "Routing > Queue > View",
+        "Routing > Wrapup Code > View" and "Directory > User > View". Disable to
+        log the raw ids and skip the extra API calls.
+      value:
+        type: boolean
+        example: true
     - name: collection_lag_seconds
       description: |
         How far back to offset the trailing query window, giving Genesys time to index

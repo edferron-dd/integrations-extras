@@ -4,6 +4,10 @@
 #     ddev -x validate models -s <INTEGRATION_NAME>
 
 
+def instance_collect_logs():
+    return False
+
+
 def instance_collection_lag_seconds():
     return 60
 
@@ -26,3 +30,7 @@ def instance_min_collection_interval():
 
 def instance_mos_threshold():
     return 4.2
+
+
+def instance_resolve_names():
+    return True
