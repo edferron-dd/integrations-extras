@@ -1,6 +1,6 @@
 # Deploying the Genesys Cloud MOS integration on Windows Server
 
-Install instructions for `datadog_genesys_mos-1.1.0-py3-none-any.whl` on a Windows
+Install instructions for `datadog_genesys_mos-1.1.3-py3-none-any.whl` on a Windows
 Server host running the Datadog Agent.
 
 All commands are PowerShell and must run in a session with **administrator**
@@ -43,14 +43,14 @@ wheel.
 ## 2. Install the wheel
 
 ```powershell
-& "$env:ProgramFiles\Datadog\Datadog Agent\bin\agent.exe" integration install -w C:\Temp\datadog_genesys_mos-1.1.0-py3-none-any.whl
+& "$env:ProgramFiles\Datadog\Datadog Agent\bin\agent.exe" integration install -w C:\Temp\datadog_genesys_mos-1.1.3-py3-none-any.whl
 ```
 
 If the Agent rejects the wheel because the integration is not one Datadog ships, add
 `--third-party` before `-w`:
 
 ```powershell
-& "$env:ProgramFiles\Datadog\Datadog Agent\bin\agent.exe" integration install --third-party -w C:\Temp\datadog_genesys_mos-1.1.0-py3-none-any.whl
+& "$env:ProgramFiles\Datadog\Datadog Agent\bin\agent.exe" integration install --third-party -w C:\Temp\datadog_genesys_mos-1.1.3-py3-none-any.whl
 ```
 
 ## 3. Install the Genesys Cloud SDK
@@ -82,7 +82,16 @@ instances:
     client_secret: "<CLIENT_SECRET>"
     min_collection_interval: 300
     collect_logs: true
+
+logs:
+  - type: integration
+    source: genesys-mos
+    service: genesys-mos
 ```
+
+The `logs` section is required alongside `collect_logs: true`. Without it the Agent has
+nowhere to send the logs the check emits, and every run logs
+`Failed to write log to file, file is nil for integration ID: genesys_mos:...`.
 
 Set `region` to the API host for your organization, without the `api.` prefix (for example
 `mypurecloud.com`, `usw2.pure.cloud`, or `mypurecloud.ie`).
@@ -103,6 +112,11 @@ instances:
     client_secret: ENC[genesys_client_secret]
     min_collection_interval: 300
     collect_logs: true
+
+logs:
+  - type: integration
+    source: genesys-mos
+    service: genesys-mos
 ```
 
 See the **Secrets management** section of [README.md](README.md) for the backend setup, and
@@ -138,12 +152,15 @@ time range if nothing appears at first.
 
 - **`genesys_mos.can_connect` is `0`** — verify `region`, `client_id` and `client_secret`,
   and confirm the OAuth client's role has **Analytics > Conversation Detail > View**.
-- **No logs in Datadog** — confirm `logs_enabled: true` in `datadog.yaml` and
-  `collect_logs: true` on the instance, then restart the Agent.
+- **No logs in Datadog** — confirm `logs_enabled: true` in `datadog.yaml`,
+  `collect_logs: true` on the instance, and the `logs:` section with `type: integration` in
+  the check's `conf.yaml`, then restart the Agent. A missing `logs:` section shows up in
+  `agent.log` as `Failed to write log to file, file is nil for integration ID`.
 - **Logs show raw ids instead of names** — the OAuth client's role is missing
   **Routing > Queue > View**, **Routing > Wrapup Code > View**, or
-  **Directory > User > View**. The check logs a warning and falls back to ids rather than
-  dropping the logs.
+  **Directory > User > View**. The check logs one warning per failed entity type naming the
+  permission and the HTTP status (`HTTP 403 Forbidden` means the permission is missing),
+  and falls back to ids rather than dropping the logs.
 - **No conversations reported** — MOS is only present on conversations that used media with
   measurable quality (voice), and only after they have ended and been indexed. Increase
   `collection_lag_seconds` if conversations appear to be missed near the window boundary.

@@ -68,3 +68,8 @@ files:
           The interval in seconds between check runs. This also sets the length of the
           trailing query window, so consecutive runs cover approximately disjoint
           windows and the MOS distribution is not double-counted.
+  - template: logs
+    example:
+    - type: integration
+      source: genesys-mos
+      service: genesys-mos

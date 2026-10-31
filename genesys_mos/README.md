@@ -76,7 +76,9 @@ versions of the Agent.
    logs_enabled: true
    ```
 
-2. Set `collect_logs` on the instance. Resolving queue, wrap-up code and agent ids into
+2. Set `collect_logs` on the instance and add a `logs` section of `type: integration` to
+   the same `conf.yaml`. Without that section the Agent drops the logs and warns
+   `file is nil for integration ID`. Resolving queue, wrap-up code and agent ids into
    display names needs three more permissions on the OAuth client's role:
    **Routing > Queue > View**, **Routing > Wrapup Code > View**, and
    **Directory > User > View**. Set `resolve_names: false` to log the raw ids instead and
@@ -89,6 +91,11 @@ versions of the Agent.
        client_secret: "<CLIENT_SECRET>"
        min_collection_interval: 300
        collect_logs: true
+
+   logs:
+     - type: integration
+       source: genesys-mos
+       service: genesys-mos
    ```
 
 3. [Restart the Agent][8].
@@ -198,8 +205,9 @@ The Genesys Cloud MOS integration does not include any events.
   measurable quality (for example voice), and only after they have ended and been indexed.
   Increase `collection_lag_seconds` if conversations appear to be missed near the window
   boundary.
-- No logs in Datadog: confirm `logs_enabled: true` in `datadog.yaml` and `collect_logs:
-  true` on the instance.
+- No logs in Datadog: confirm `logs_enabled: true` in `datadog.yaml`, `collect_logs:
+  true` on the instance, and a `logs:` section with `type: integration` in the check's
+  `conf.yaml`.
 - Logs show raw ids instead of names: the OAuth client's role is missing
   **Routing > Queue > View**, **Routing > Wrapup Code > View**, or
   **Directory > User > View**. The check logs a warning and falls back to ids rather than

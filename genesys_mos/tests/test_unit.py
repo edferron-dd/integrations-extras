@@ -122,6 +122,41 @@ def test_auth_failure_reports_can_connect_zero_and_raises(aggregator, instance):
     aggregator.assert_metric("genesys_mos.conversation.count", count=0)
 
 
+def test_authenticate_sets_host_and_requests_client_credentials_token(instance):
+    """Exercises `_authenticate` against a stub shaped like the real SDK
+    namespace. The package assigns `configuration = Configuration()` at import
+    time, shadowing its own submodule, so the host must be set via the
+    `Configuration` singleton exported at the package root -- a permissive
+    MagicMock would hide a wrong attribute path."""
+    check = _check(instance)
+
+    singleton = MagicMock()
+    api_client = MagicMock()
+    token_client = MagicMock()
+    api_client.get_client_credentials_token.return_value = token_client
+
+    class GenesysStub(object):
+        # Mirrors the SDK: `configuration` is a Configuration instance, not the
+        # submodule, and so has no `Configuration` attribute.
+        configuration = singleton
+        Configuration = MagicMock(return_value=singleton)
+        ApiClient = MagicMock(return_value=api_client)
+
+    stub = GenesysStub()
+    del singleton.Configuration
+
+    with patch.dict("sys.modules", {"PureCloudPlatformClientV2": stub}):
+        result = check._authenticate()
+
+    assert result is token_client
+    assert singleton.host == "https://api.mypurecloud.com"
+    # The ApiClient constructor reads the singleton host, so ordering matters.
+    assert stub.Configuration.call_args_list and stub.ApiClient.called
+    api_client.get_client_credentials_token.assert_called_once_with(
+        instance["client_id"], instance["client_secret"]
+    )
+
+
 def test_collect_conversations_pages_and_dedupes(instance):
     check = _check(instance)
 
@@ -383,6 +418,52 @@ def test_names_are_looked_up_in_one_batch_per_entity_type(instance):
     apis.routing.get_routing_queues.reset_mock()
     check._resolve_names(apis, [conversation])
     assert apis.routing.get_routing_queues.call_count == 0
+
+
+def test_name_lookup_does_not_page_past_an_id_filtered_batch(instance):
+    # Genesys ignores page_number when `id` is set and returns the same
+    # entities on every page; paging until an empty page would never end.
+    check = _check(instance)
+    list_endpoint = MagicMock(return_value=_listing([_entity("q1", "Collections_OUT")]))
+
+    check._fetch_names(check._queue_names, {"q1"}, list_endpoint)
+
+    assert list_endpoint.call_count == 1
+    assert check._queue_names == {"q1": "Collections_OUT"}
+
+
+def test_one_failed_name_lookup_does_not_block_the_others(instance):
+    check = _check(instance)
+    conversation = _conversation(
+        "conv-5",
+        4.4,
+        participants=[
+            _participant(
+                "agent",
+                user_id="u1",
+                sessions=[_session("inbound", segments=[_segment(queue_id="q1", wrap_up_code="w1")])],
+            ),
+        ],
+    )
+
+    forbidden = Exception("forbidden")
+    forbidden.status = 403
+    forbidden.reason = "Forbidden"
+
+    apis = MagicMock()
+    apis.routing.get_routing_queues.side_effect = forbidden
+    apis.routing.get_routing_wrapupcodes.side_effect = [_listing([_entity("w1", "No Answer")]), _listing(None)]
+    apis.users.get_users.side_effect = [_listing([_entity("u1", "Avery Stone")]), _listing(None)]
+
+    with patch.object(check.log, "warning") as warning:
+        check._resolve_names(apis, [conversation])
+
+    assert check._queue_names == {}
+    assert check._wrapup_names == {"w1": "No Answer"}
+    assert check._user_names == {"u1": "Avery Stone"}
+    assert warning.call_count == 1
+    assert "Routing > Queue > View" in warning.call_args.args
+    assert "HTTP 403 Forbidden" in warning.call_args.args
 
 
 def test_name_lookup_failure_still_logs_with_ids(aggregator, instance):

@@ -111,8 +111,12 @@ class GenesysMosCheck(AgentCheck):
         Isolated for testability (patched in unit tests)."""
         import PureCloudPlatformClientV2 as genesys
 
-        genesys.configuration.Configuration().host = "https://api.{}".format(self.region)
-        return genesys.api_client.ApiClient().get_client_credentials_token(self.client_id, self.client_secret)
+        # `Configuration` is a singleton, and the SDK shadows its own
+        # `configuration` submodule with an instance of it at import time, so the
+        # host must be set on the class from the package root. The ApiClient
+        # constructor reads that host, so it has to be set first.
+        genesys.Configuration().host = "https://api.{}".format(self.region)
+        return genesys.ApiClient().get_client_credentials_token(self.client_id, self.client_secret)
 
     def _connect(self):
         """Build the API bindings used by a run from a single authenticated client."""
@@ -205,10 +209,10 @@ class GenesysMosCheck(AgentCheck):
         if self.resolve_names:
             try:
                 self._resolve_names(apis, conversations.values())
-            except Exception:
+            except Exception as e:
                 # Names are presentation only. A failed lookup must not cost us
                 # the logs themselves, which still carry the raw ids.
-                self.log.warning("Could not resolve Genesys queue/wrap-up/user names; logging ids instead")
+                self.log.warning("Could not resolve Genesys queue/wrap-up/user names; logging ids instead: %s", e)
 
         for conversation in conversations.values():
             self.send_log(self._build_log(conversation))
@@ -317,40 +321,66 @@ class GenesysMosCheck(AgentCheck):
                         if wrapup_id:
                             wrapup_ids.add(wrapup_id)
 
-        self._fetch_names(self._queue_names, queue_ids, apis.routing.get_routing_queues)
-        self._fetch_names(self._wrapup_names, wrapup_ids, apis.routing.get_routing_wrapupcodes)
-        self._fetch_names(self._user_names, user_ids, apis.users.get_users)
+        lookups = (
+            ("queue", "Routing > Queue > View", self._queue_names, queue_ids, apis.routing.get_routing_queues),
+            (
+                "wrap-up code",
+                "Routing > Wrapup Code > View",
+                self._wrapup_names,
+                wrapup_ids,
+                apis.routing.get_routing_wrapupcodes,
+            ),
+            ("user", "Directory > User > View", self._user_names, user_ids, apis.users.get_users),
+        )
+        # Each entity type needs its own OAuth permission, so one missing
+        # permission must not stop the other names from resolving.
+        for entity, permission, cache, ids, list_endpoint in lookups:
+            try:
+                self._fetch_names(cache, ids, list_endpoint)
+            except Exception as e:
+                self.log.warning(
+                    "Could not resolve Genesys %s names (the OAuth client's role needs %s); logging ids instead: %s",
+                    entity,
+                    permission,
+                    _describe_error(e),
+                )
 
     def _fetch_names(self, cache, ids, list_endpoint):
         """Populate `cache` with {id: name} for the ids it is missing.
 
-        All three Genesys listing endpoints accept an `id` filter and page
-        identically, so one batched lookup per entity type is enough however
-        many conversations the window held."""
+        All three Genesys listing endpoints accept an `id` filter. Each batch is
+        at most one page of ids, so a single request per batch returns every
+        match. Do not page past it: with an `id` filter Genesys returns the same
+        entities for every page_number, so paging until an empty page never
+        terminates and hangs the check run."""
         missing = sorted(i for i in ids if i not in cache)
         if not missing:
             return
 
         for offset in range(0, len(missing), LOOKUP_PAGE_SIZE):
             batch = missing[offset : offset + LOOKUP_PAGE_SIZE]
-            page_number = 1
-            while True:
-                listing = list_endpoint(id=batch, page_size=LOOKUP_PAGE_SIZE, page_number=page_number)
-                entities = getattr(listing, "entities", None)
-                if not entities:
-                    break
-                for entity in entities:
-                    entity_id = getattr(entity, "id", None)
-                    name = getattr(entity, "name", None)
-                    if entity_id and name:
-                        cache[entity_id] = name
-                page_number += 1
+            listing = list_endpoint(id=batch, page_size=LOOKUP_PAGE_SIZE, page_number=1)
+            for entity in getattr(listing, "entities", None) or []:
+                entity_id = getattr(entity, "id", None)
+                name = getattr(entity, "name", None)
+                if entity_id and name:
+                    cache[entity_id] = name
 
     @staticmethod
     def _names(cache, ids):
         """Display names for `ids`, falling back to the raw id when a lookup did
         not return one (deleted queue, name resolution disabled, lookup failed)."""
         return [cache.get(i, i) for i in ids]
+
+
+def _describe_error(error):
+    """Short form of a Genesys SDK error. ApiException carries the HTTP status
+    and reason, which is what tells a missing permission (403) apart from the
+    rest; its full string form also dumps headers and the response body."""
+    status = getattr(error, "status", None)
+    if status is not None:
+        return "HTTP {} {}".format(status, getattr(error, "reason", "") or "").strip()
+    return "{}: {}".format(type(error).__name__, error)
 
 
 def _append_unique(items, value):
