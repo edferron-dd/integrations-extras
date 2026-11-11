@@ -103,6 +103,8 @@ def test_documented_pagination_dedupe_and_metrics(aggregator, instance):
 
     # Page 1: 4.42, 4.05 | Page 2: 4.05 (duplicate id), 3.61 -> 3 unique conversations.
     values = [4.42, 4.05, 3.61]
+    # Read straight from the documented totalHits field.
+    aggregator.assert_metric("genesys_mos.call.count", value=3, tags=EXPECTED_TAGS)
     aggregator.assert_metric("genesys_mos.conversation.count", value=3, tags=EXPECTED_TAGS)
     aggregator.assert_metric("genesys_mos.conversation.mos.avg", value=sum(values) / len(values), tags=EXPECTED_TAGS)
     aggregator.assert_metric("genesys_mos.conversation.mos.min", value=3.61, tags=EXPECTED_TAGS)
@@ -111,8 +113,10 @@ def test_documented_pagination_dedupe_and_metrics(aggregator, instance):
     aggregator.assert_metric("genesys_mos.can_connect", value=1, tags=EXPECTED_TAGS)
     aggregator.assert_all_metrics_covered()
 
-    # Paged until an empty page was returned (3 requests: page 1, 2, and the empty page 3).
-    assert len(analytics_api.received_queries) == 3
+    # Paged until an empty page was returned (3 requests: page 1, 2, and the empty
+    # page 3), plus one single-record request for the call count.
+    assert len(analytics_api.received_queries) == 4
+    assert analytics_api.received_queries[-1].paging.page_size == 1
 
 
 def test_query_body_matches_genesys_api_contract(aggregator, instance):
@@ -123,7 +127,7 @@ def test_query_body_matches_genesys_api_contract(aggregator, instance):
 
     _run_check(instance, analytics_api)
 
-    body = analytics_api.received_queries[0]
+    body, count_body = analytics_api.received_queries
 
     # Trailing RFC3339 window "<start>/<end>".
     start, end = body.interval.split("/")
@@ -142,6 +146,20 @@ def test_query_body_matches_genesys_api_contract(aggregator, instance):
     assert body.paging.page_size == 100
     assert body.paging.page_number == 1
 
+    # The call count covers the same window and ended calls, without the MOS
+    # predicate, restricted to voice, and fetches a single record.
+    assert count_body.interval == body.interval
+    count_filter = count_body.conversation_filters[0]
+    assert count_filter.type == "and"
+    assert {p.dimension: p.operator for p in count_filter.predicates} == {"conversationEnd": "exists"}
+    segment_filter = count_body.segment_filters[0]
+    assert segment_filter.type == "and"
+    assert [(p.dimension, p.operator, p.value) for p in segment_filter.predicates] == [
+        ("mediaType", "matches", "voice")
+    ]
+    assert count_body.paging.page_size == 1
+    assert count_body.paging.page_number == 1
+
 
 def test_conversation_without_mos_is_skipped(aggregator, instance):
     import PureCloudPlatformClientV2 as genesys
@@ -155,8 +173,10 @@ def test_conversation_without_mos_is_skipped(aggregator, instance):
 
     _run_check(instance, analytics_api)
 
-    # One conversation carries MOS (4.30); the other has no mediaStatsMinConversationMos
-    # and must be skipped rather than counted as a zero.
+    # One conversation carries MOS (4.30); the other has no mediaStatsMinConversationMos.
+    # Both are calls (totalHits), but only the scored one feeds the MOS metrics
+    # rather than being counted as a zero.
+    aggregator.assert_metric("genesys_mos.call.count", value=2, tags=EXPECTED_TAGS)
     aggregator.assert_metric("genesys_mos.conversation.count", value=1, tags=EXPECTED_TAGS)
     aggregator.assert_metric("genesys_mos.conversation.mos.avg", value=4.30, tags=EXPECTED_TAGS)
     aggregator.assert_metric("genesys_mos.conversation.mos.min", value=4.30, tags=EXPECTED_TAGS)

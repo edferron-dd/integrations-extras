@@ -80,10 +80,13 @@ def test_emits_distribution_gauges_and_can_connect(aggregator, instance):
     with (
         patch.object(check, "_connect", return_value=MagicMock()),
         patch.object(check, "_collect_conversations", return_value=conversations),
+        patch.object(check, "_count_calls", return_value=5),
     ):
         check.check(None)
 
     tags = ["region:mypurecloud.com", "team:voice"]
+    # Total calls, scored or not, is reported independently of the MOS subset.
+    aggregator.assert_metric("genesys_mos.call.count", value=5, tags=tags)
     aggregator.assert_metric("genesys_mos.conversation.count", value=3, tags=tags)
     aggregator.assert_metric("genesys_mos.conversation.mos.avg", value=(4.8 + 4.1 + 3.5) / 3, tags=tags)
     aggregator.assert_metric("genesys_mos.conversation.mos.min", value=3.5, tags=tags)
@@ -100,10 +103,12 @@ def test_no_conversations_reports_zero(aggregator, instance):
     with (
         patch.object(check, "_connect", return_value=MagicMock()),
         patch.object(check, "_collect_conversations", return_value={}),
+        patch.object(check, "_count_calls", return_value=0),
     ):
         check.check(None)
 
     tags = ["region:mypurecloud.com", "team:voice"]
+    aggregator.assert_metric("genesys_mos.call.count", value=0, tags=tags)
     aggregator.assert_metric("genesys_mos.conversation.count", value=0, tags=tags)
     aggregator.assert_metric("genesys_mos.conversation.below_threshold.count", value=0, tags=tags)
     # No quality gauges when there is no data.
@@ -170,7 +175,8 @@ def test_collect_conversations_pages_and_dedupes(instance):
     page1.conversations = [make_conversation("c1", 4.5), make_conversation("c2", 3.9)]
     page2 = MagicMock()
     # c2 repeated across page boundary -> must dedupe
-    page2.conversations = [make_conversation("c2", 3.9), make_conversation("c3", 4.9)]
+    # c4 has no MOS -> dropped; it is only counted through _count_calls
+    page2.conversations = [make_conversation("c2", 3.9), make_conversation("c3", 4.9), make_conversation("c4", None)]
     page3 = MagicMock()
     page3.conversations = None
 
@@ -189,6 +195,38 @@ def test_collect_conversations_pages_and_dedupes(instance):
         "c3": 4.9,
     }
     assert analytics_api.post_analytics_conversations_details_query.call_count == 3
+
+
+def _count_response(total_hits):
+    response = MagicMock()
+    response.total_hits = total_hits
+    return response
+
+
+def test_count_calls_reads_total_hits_from_a_single_record_page(instance):
+    check = _check(instance)
+    analytics_api = MagicMock()
+    analytics_api.post_analytics_conversations_details_query.return_value = _count_response(42)
+
+    genesys_stub = MagicMock()
+    with patch.dict("sys.modules", {"PureCloudPlatformClientV2": genesys_stub}):
+        assert check._count_calls(analytics_api, "start/end") == 42
+
+    # One request, one record: the count comes from totalHits, not from paging.
+    analytics_api.post_analytics_conversations_details_query.assert_called_once()
+    body = analytics_api.post_analytics_conversations_details_query.call_args.args[0]
+    assert body.paging.page_size == 1
+    assert body.paging.page_number == 1
+
+
+def test_count_calls_is_zero_when_total_hits_is_missing(instance):
+    check = _check(instance)
+    analytics_api = MagicMock()
+    analytics_api.post_analytics_conversations_details_query.return_value = _count_response(None)
+
+    genesys_stub = MagicMock()
+    with patch.dict("sys.modules", {"PureCloudPlatformClientV2": genesys_stub}):
+        assert check._count_calls(analytics_api, "start/end") == 0
 
 
 # --- Conversation logs ---------------------------------------------------------
@@ -348,6 +386,7 @@ def test_logs_are_not_submitted_unless_collect_logs_is_enabled(aggregator, insta
     with (
         patch.object(check, "_connect", return_value=MagicMock()),
         patch.object(check, "_collect_conversations", return_value=_conversations({"c1": 4.8})),
+        patch.object(check, "_count_calls", return_value=0),
         patch.object(check, "send_log") as send_log,
     ):
         check.check(None)
@@ -364,6 +403,7 @@ def test_one_log_per_conversation_when_enabled(aggregator, instance):
     with (
         patch.object(check, "_connect", return_value=MagicMock()),
         patch.object(check, "_collect_conversations", return_value=conversations),
+        patch.object(check, "_count_calls", return_value=0),
         patch.object(check, "send_log") as send_log,
     ):
         check.check(None)
@@ -474,6 +514,7 @@ def test_name_lookup_failure_still_logs_with_ids(aggregator, instance):
     with (
         patch.object(check, "_connect", return_value=MagicMock()),
         patch.object(check, "_collect_conversations", return_value=conversations),
+        patch.object(check, "_count_calls", return_value=0),
         patch.object(check, "_resolve_names", side_effect=RuntimeError("missing routing scope")),
         patch.object(check, "send_log") as send_log,
     ):

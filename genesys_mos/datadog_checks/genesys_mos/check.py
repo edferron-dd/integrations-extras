@@ -12,8 +12,17 @@ from datadog_checks.base import AgentCheck, ConfigurationError
 MOS_DIMENSION = "mediaStatsMinConversationMos"
 CONVERSATION_END_DIMENSION = "conversationEnd"
 
+# Segment dimension used to restrict the call count to calls. MOS only exists
+# for voice, so this is also the population the MOS metrics are drawn from.
+MEDIA_TYPE_DIMENSION = "mediaType"
+VOICE_MEDIA_TYPE = "voice"
+
 # Page size cap enforced by the Genesys analytics API.
 PAGE_SIZE = 100
+
+# The call count only reads `totalHits` off the response, so it asks for the
+# smallest page the API allows rather than pulling a record per call.
+COUNT_PAGE_SIZE = 1
 
 # Page size cap enforced by the routing/users configuration APIs, which are
 # queried in bulk to turn the ids on a conversation into display names.
@@ -83,6 +92,7 @@ class GenesysMosCheck(AgentCheck):
         try:
             apis = self._connect()
             conversations = self._collect_conversations(apis.analytics, interval)
+            call_count = self._count_calls(apis.analytics, interval)
         except Exception:
             # Report connectivity as a 0/1 gauge rather than a service check.
             self.gauge(self.CAN_CONNECT_METRIC, 0, tags=self.base_tags)
@@ -90,6 +100,7 @@ class GenesysMosCheck(AgentCheck):
             raise
 
         self.gauge(self.CAN_CONNECT_METRIC, 1, tags=self.base_tags)
+        self.gauge("call.count", call_count, tags=self.base_tags)
         self._submit_metrics(conversations)
 
         if self.collect_logs:
@@ -140,13 +151,7 @@ class GenesysMosCheck(AgentCheck):
         mos_predicate.dimension = MOS_DIMENSION
         mos_predicate.operator = "exists"
 
-        end_predicate = genesys.ConversationDetailQueryPredicate()
-        end_predicate.dimension = CONVERSATION_END_DIMENSION
-        end_predicate.operator = "exists"
-
-        conversation_filter = genesys.ConversationDetailQueryFilter()
-        conversation_filter.type = "and"
-        conversation_filter.predicates = [mos_predicate, end_predicate]
+        conversation_filter = _ended_conversation_filter(genesys, mos_predicate)
 
         collected = {}
         page_number = 1
@@ -174,6 +179,39 @@ class GenesysMosCheck(AgentCheck):
             page_number += 1
 
         return collected
+
+    def _count_calls(self, analytics_api, interval):
+        """Number of ended voice calls in the window, with or without a MOS
+        value. Genesys reports the match count as `totalHits` on every page, so
+        one single-record request is enough; no paging through the calls.
+
+        Calls that never carried audio (unanswered, failed, abandoned before
+        connecting) have no MOS, which is what makes this differ from
+        `conversation.count`. The window and the "ended" rule are the same as
+        the MOS query's, so the two counts are directly comparable."""
+        import PureCloudPlatformClientV2 as genesys
+
+        voice_predicate = genesys.SegmentDetailQueryPredicate()
+        voice_predicate.dimension = MEDIA_TYPE_DIMENSION
+        voice_predicate.operator = "matches"
+        voice_predicate.value = VOICE_MEDIA_TYPE
+
+        segment_filter = genesys.SegmentDetailQueryFilter()
+        segment_filter.type = "and"
+        segment_filter.predicates = [voice_predicate]
+
+        body = genesys.ConversationQuery()
+        body.interval = interval
+        body.conversation_filters = [_ended_conversation_filter(genesys)]
+        body.segment_filters = [segment_filter]
+        paging = genesys.PagingSpec()
+        paging.page_size = COUNT_PAGE_SIZE
+        paging.page_number = 1
+        body.paging = paging
+
+        response = analytics_api.post_analytics_conversations_details_query(body)
+        # Genesys omits `totalHits` when nothing matched.
+        return getattr(response, "total_hits", None) or 0
 
     def _submit_metrics(self, conversations):
         count = len(conversations)
@@ -371,6 +409,19 @@ class GenesysMosCheck(AgentCheck):
         """Display names for `ids`, falling back to the raw id when a lookup did
         not return one (deleted queue, name resolution disabled, lookup failed)."""
         return [cache.get(i, i) for i in ids]
+
+
+def _ended_conversation_filter(genesys, *predicates):
+    """AND filter matching conversations that have ended, plus `predicates`.
+    Shared by the MOS query and the call count so both cover the same calls."""
+    end_predicate = genesys.ConversationDetailQueryPredicate()
+    end_predicate.dimension = CONVERSATION_END_DIMENSION
+    end_predicate.operator = "exists"
+
+    conversation_filter = genesys.ConversationDetailQueryFilter()
+    conversation_filter.type = "and"
+    conversation_filter.predicates = list(predicates) + [end_predicate]
+    return conversation_filter
 
 
 def _describe_error(error):

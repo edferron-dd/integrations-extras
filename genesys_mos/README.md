@@ -10,8 +10,9 @@ approximately 4.9
 (toll quality). Genesys Cloud computes it per conversation and exposes it directly through
 the [Analytics Conversation Detail Query API][2] as the `mediaStatsMinConversationMos`
 dimension (the minimum MOS observed on the conversation). This check queries ended
-conversations on a trailing interval and reports the average and worst MOS, the number of
-conversations, and how many fall at or below a configurable quality threshold.
+voice calls on a trailing interval and reports the total number of calls (with or without
+a MOS score), the average and worst MOS, the number of conversations with a MOS score, and
+how many fall at or below a configurable quality threshold.
 
 The check can also emit one log per conversation, carrying the same columns as the Genesys
 Cloud interactions view: date, conversation duration, direction, queue, wrap-up, users,
